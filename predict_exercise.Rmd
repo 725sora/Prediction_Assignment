@@ -1,0 +1,127 @@
+---
+title: "Prediction of fitness exercise quality"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Executive Summary
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. In this project, the goal is to predict the quality of a certain exercise. The correct done exercise is classified by "A", others are classed by "B", "C", "D" or "E", depending on the failure the users made. A detailed explanation of the data set can be found here http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har
+were the data is provided from. To predict the quality of the exercise two models are created. The results for the testing data are shown in the last section.
+
+# Loading libraries
+
+The necessary libraries are loaded first:
+
+```{r, echo=TRUE}
+library(caret)
+library(dplyr)
+```
+
+# Downloading train and test data and data preprocessing
+
+The train and final test data are downloaded:
+
+```{r downloading data, echo=TRUE}
+if(!exists("pml-training.csv")) {
+  download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", "pml-training.csv")
+}
+pml_training <- read.csv("pml-training.csv", header = TRUE)
+
+if(!exists("pml-testing.csv")) {
+  download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", "pml-testing.csv")
+}
+pml_testing <- read.csv("pml-testing.csv", header = TRUE)
+
+```
+
+For cross validation purposes the training data will be deviede in two parts. One is used for training and one for validation.
+
+```{r data partitioning, echo=TRUE}
+inTrain <- createDataPartition(pml_training$classe, p=0.7, list=FALSE)
+training <- pml_training[inTrain,]
+validating <- pml_training[-inTrain,]
+```
+
+The first seven columns of the data frame seems to be some organisational variables, which have no impact to the outcome  classe. So we can omit these.
+
+```{r remove organisational variables, echo=TRUE}
+train_s <- training[-c(1:7)]
+```
+
+Since to many models near zero-variance predictors cause model crash or unstable fits, we will remove the near zero-variance predictors from the training data set.
+
+```{r remove near zero variables, echo=TRUE}
+nzv <- nearZeroVar(train_s)
+train_s <- train_s[,-nzv]
+```
+
+Furthermoe there are too many missing values in the training data. We will reduce them:
+
+```{r reduce NAs, echo=TRUE}
+train_s <- train_s %>%
+  select_if(.predicate=funs(sum(is.na(.))<=2))
+```
+
+Experiments have shown, that in our case the reduction of the correlated predictors have minimal impact to the accuracy of the models, but higher impact to the runtime of the model calculation. So we will reduce the number of highly correlated predictors.
+
+```{r corrlated predictors, echo=TRUE}
+cor_train <- cor(train_s[,-length(train_s)])
+highly_cor <- findCorrelation(cor_train, cutoff = 0.75)
+train_s <- train_s[,-highly_cor]
+```
+
+# Creating Model 
+
+Now we are able to train some models and chose the better one. 
+
+## Random Forest
+
+First we try the random forest algorithm.
+
+```{r random forest, echo=TRUE}
+mod_rf <- train(classe ~., method="rf", data=train_s)
+print(mod_rf)
+```
+
+The cross validation to the validation data delivers as follows. 
+
+```{r rf cross validation, echo=TRUE}
+pred_rf <- predict(mod_rf, validating)
+confusionMatrix(pred_rf, as.factor(validating$classe))
+```
+
+So the accuracy for this model is 0.993.
+
+The predictors with the highest impact for this model can be calculated as follows. We choose the two predictors with the highest impact and plot this classified by classe. 
+
+```{r plot highes impact, echo=TRUE}
+varImp(mod_rf, scale = FALSE)
+qplot(train_s$yaw_belt, train_s$magnet_dumbbell_z, colour=train_s$classe)
+```
+
+
+## Gradient Boosting
+
+Next we try the gradient boosting algorithm.
+
+```{r gradient boosting, echo=TRUE}
+mod_gbm <- train(classe ~., method="gbm", data=train_s, verbose=FALSE)
+print(mod_gbm)
+pred_gbm <- predict(mod_gbm, validating)
+confusionMatrix(pred_gbm, as.factor(validating$classe))
+```
+
+Cross validation for this model shows an accuracy of about 0.949. 
+
+# Apply the calculated model to the test data
+
+Now we apply the model created by the random forest algorithm to the testing data. 
+
+```{r apply to test data, echo=TRUE}
+predict(mod_rf, pml_testing)
+```
+
+The result is as above with the accuracy of 0.993.
